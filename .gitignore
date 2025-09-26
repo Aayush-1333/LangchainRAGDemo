@@ -1,0 +1,7 @@
+.idea
+.venv
+langchain_rag_demo/faiss_index
+langchain_rag_demo/data
+__pycache__
+
+uv.lock
