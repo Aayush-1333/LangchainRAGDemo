@@ -14,7 +14,7 @@ def setup_logger(name: str = __name__, mode: str = "DEBUG") -> logging.Logger:
     }
 
     if not logger.handlers:
-        # Console handler
+        # ========= Console handler =========
         ch = logging.StreamHandler(sys.stdout)
         ch.setLevel(log_levels[mode])  # Control console verbosity
 
@@ -34,5 +34,16 @@ def setup_logger(name: str = __name__, mode: str = "DEBUG") -> logging.Logger:
         )
         ch.setFormatter(formatter)
         logger.addHandler(ch)
+
+        # ======= File handler =======
+        file_handler = logging.FileHandler("langchain_rag_demo/logs/app.log", "a")
+        file_handler.setLevel(logging.DEBUG)
+
+        file_formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
 
     return logger

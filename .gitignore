@@ -2,6 +2,8 @@
 .venv
 langchain_rag_demo/faiss_index
 langchain_rag_demo/data
+logs
+faiss_index
 __pycache__
 
 uv.lock
