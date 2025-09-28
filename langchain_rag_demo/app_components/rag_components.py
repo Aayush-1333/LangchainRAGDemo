@@ -2,9 +2,10 @@ import logging
 import os.path
 from typing import Literal, TypedDict, List, Dict, Any
 
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
+from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI
@@ -45,7 +46,7 @@ def initialize_llm() -> ChatOpenAI:
     return llm
 
 
-def initialize_vector_store() -> FAISS:
+def initialize_vector_store_retriever() -> VectorStoreRetriever:
     """Load vector store if exists, else create new vector store"""
 
     INDEX_PATH: Literal[str] = "langchain_rag_demo/faiss_index"
@@ -62,7 +63,11 @@ def initialize_vector_store() -> FAISS:
 
         # loading PDF docs as Document objects
         logger.debug("Loading PDF docs...")
-        loader = PyPDFLoader("langchain_rag_demo/data/1. Intermediate Algebra 2e, Lynn Marecek.pdf")
+        loader = DirectoryLoader(
+            path="langchain_rag_demo/data",
+            loader_cls=PyPDFLoader,
+            use_multithreading=True
+        )
         docs = []
         for doc in loader.load():
             docs.append(doc)
@@ -70,7 +75,7 @@ def initialize_vector_store() -> FAISS:
         # splitting docs into chunks
         logger.debug("Splitting doc into chunks...")
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
+            chunk_size=1024,
             chunk_overlap=20,
             length_function=len,
             is_separator_regex=False
@@ -80,16 +85,18 @@ def initialize_vector_store() -> FAISS:
         # creating vector store
         logger.debug("Saving faiss index into directory: %s", INDEX_PATH)
         vector_store = FAISS.from_documents(doc_chunks, embedding=EMBEDDING_MODEL)
-        vector_store.save_local("faiss_index")
+        vector_store.save_local(INDEX_PATH)
     else:
         logger.info("Loading faiss index")
         vector_store = FAISS.load_local(INDEX_PATH, embeddings=EMBEDDING_MODEL, allow_dangerous_deserialization=True)
 
-    return vector_store
+    # return vector_store.as_retriever(search_type="similarity_score_threshold",
+    #                                  search_kwargs={"k": 5, "lambda_mult": 0, "score_threshold": 0.5})
+    return vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 6, "lambda_mult": 0.25})
 
 
 chat_model = initialize_llm()
-vector_store = initialize_vector_store()
+vector_store_retriever = initialize_vector_store_retriever()
 
 
 class State(TypedDict):
@@ -97,14 +104,16 @@ class State(TypedDict):
     question: str
     context: List[Document]
     answer: str
+    metadata_list: List[Dict[str, Any]]
 
 
 def retrieve(state: State) -> Dict:
     """Langgraph state for retrieving docs from vector DB."""
 
-    logger.debug("Retrieving docs from vector store using similarity search...")
-    retrieved_docs = vector_store.similarity_search(state['question'], k=10)
-    return {'context': retrieved_docs}
+    logger.debug("Retrieving docs from vector store based on question: %s", state['question'])
+    retrieved_docs = vector_store_retriever.invoke(state['question'])
+    doc_sources = [doc.metadata for doc in retrieved_docs]
+    return {'context': retrieved_docs, 'metadata_list': doc_sources}
 
 
 def generate(state: State):
@@ -116,9 +125,9 @@ def generate(state: State):
         'question': state['question'],
         'context': docs_content
     })
-    logger.debug("Invoking chat model to generate response...")
     response = chat_model.invoke(messages)
-    return {'answer': response.content}
+    logger.debug("Invoking chat model to generate response:\n%s", response.content)
+    return {'answer': response.content, 'metadata_list': state.get('metadata_list', [])}
 
 
 @st.cache_resource
